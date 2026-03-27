@@ -37,20 +37,20 @@ export class SearchService {
     const cached = this.cache.get(query);
     if (cached) return cached.slice(0, limit);
 
-    // 1. Compute query embedding (before FTS so cache stores results even for empty)
+    // 1. FTS5 match — early return if no results
+    const ftsRows = this.runFts(query);
+    if (ftsRows.length === 0) {
+      this.cache.set(query, []);
+      return [];
+    }
+
+    // 2. Compute query embedding (only when FTS has results)
     let queryEmbedding: Float32Array | null = null;
     try {
       const [vec] = await this.embeddingService.embedBatch([query.trim().toLowerCase()]);
       queryEmbedding = new Float32Array(vec);
     } catch {
       this.logger.warn('Query embedding failed — using FTS5-only ranking');
-    }
-
-    // 2. FTS5 match
-    const ftsRows = this.runFts(query);
-    if (ftsRows.length === 0) {
-      this.cache.set(query, []);
-      return [];
     }
 
     // 3. Normalize BM25 scores (rank is negative; lower = more relevant) — queryEmbedding already computed above

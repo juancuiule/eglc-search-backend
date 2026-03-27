@@ -85,8 +85,14 @@ describe('SearchService', () => {
   });
 
   it('uses cache on second call with same query', async () => {
-    await service.search('cached query', 10);
-    await service.search('cached query', 10);
+    // seed a doc so FTS returns a result and embedBatch is called
+    db.db.prepare(`
+      INSERT INTO documents (doc_type, project_slug, title, slug, authors, author_bios, tags, excerpt, content)
+      VALUES ('post', 'proj', 'cached query result', 'cached', '[]', '[]', '[]', 'cached query', 'cached query text')
+    `).run();
+
+    await service.search('cached', 10);
+    await service.search('cached', 10);
     expect(mockEmbeddingService.embedBatch).toHaveBeenCalledTimes(1);
   });
 });
