@@ -7,6 +7,6 @@ import { WordPressModule } from '../wordpress/wordpress.module';
 @Module({
   imports: [DatabaseModule, WordPressModule],
   providers: [IndexService, EmbeddingService],
-  exports: [IndexService],
+  exports: [IndexService, EmbeddingService],
 })
 export class IndexModule {}
