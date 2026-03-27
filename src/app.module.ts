@@ -8,7 +8,7 @@ import { ApiModule } from './api/api.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
     DatabaseModule,
     WordPressModule,
     IndexModule,

@@ -3,19 +3,19 @@ import {
   Logger,
   NotFoundException,
   ConflictException,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { DatabaseService } from '../database/database.service';
-import { WordPressService } from '../wordpress/wordpress.service';
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { DatabaseService } from "../database/database.service";
+import { WordPressService } from "../wordpress/wordpress.service";
 import {
   EmbeddingService,
   buildChunks,
   classifyDoc,
   float32ToBuffer,
   TRUNCATE_LENGTH,
-} from './embedding.service';
-import { postToDoc, projectToDoc } from '../wordpress/wordpress.mappers';
-import { IndexStatus, Project, WPPost } from '../shared/types';
+} from "./embedding.service";
+import { postToDoc, projectToDoc } from "../wordpress/wordpress.mappers";
+import { IndexStatus, Project, WPPost } from "../shared/types";
 
 const CONCURRENCY = 5;
 
@@ -26,7 +26,7 @@ export class IndexService {
   private readonly excludedTypes: Set<string>;
 
   private status: IndexStatus = {
-    state: 'idle',
+    state: "idle",
     lastIndexedAt: null,
     totalDocs: 0,
     progress: null,
@@ -39,44 +39,59 @@ export class IndexService {
     private readonly embeddings: EmbeddingService,
   ) {
     this.excludedSlugs = new Set(
-      (config.get<string>('EXCLUDED_SLUGS', '') || '')
-        .split(',').map((s) => s.trim()).filter(Boolean),
+      (config.get<string>("EXCLUDED_SLUGS", "") || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
     );
     this.excludedTypes = new Set(
-      (config.get<string>('EXCLUDED_TYPES', '') || '')
-        .split(',').map((s) => s.trim()).filter(Boolean),
+      (config.get<string>("EXCLUDED_TYPES", "") || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
     );
   }
 
   getStatus(): IndexStatus {
     const totalDocs = (
-      this.db.db.prepare('SELECT COUNT(*) as c FROM documents').get() as { c: number }
+      this.db.db.prepare("SELECT COUNT(*) as c FROM documents").get() as {
+        c: number;
+      }
     ).c;
     return { ...this.status, totalDocs };
   }
 
   startFullReindex(): void {
-    if (this.status.state === 'running') {
-      throw new ConflictException('Reindex already running');
+    if (this.status.state === "running") {
+      throw new ConflictException("Reindex already running");
     }
     this.runFullReindex().catch((err) => {
-      this.logger.error('Full reindex failed', err);
-      this.status.state = 'idle';
+      this.logger.error("Full reindex failed", err);
+      this.status.state = "idle";
     });
   }
 
   async runFullReindex(): Promise<void> {
-    this.status = { state: 'running', lastIndexedAt: null, totalDocs: 0, progress: { current: 0, total: 0 } };
+    this.status = {
+      state: "running",
+      lastIndexedAt: null,
+      totalDocs: 0,
+      progress: { current: 0, total: 0 },
+    };
 
     // ── Phase 1: content ─────────────────────────────────────────────────────
     this.db.resetSchema();
 
     const allProjects = await this.wp.getProjects();
     const projects = allProjects.filter(
-      (p) => !this.excludedSlugs.has(p.slug) && !this.excludedTypes.has(p['project-type']),
+      (p) =>
+        !this.excludedSlugs.has(p.slug) &&
+        !this.excludedTypes.has(p["project-type"]),
     );
 
     this.status.progress = { current: 0, total: projects.length };
+
+    console.log(`Indexing ${projects.length} projects...`);
 
     const insertDoc = this.db.db.prepare(`
       INSERT INTO documents
@@ -110,7 +125,7 @@ export class IndexService {
     await this.runEmbeddingPhase();
 
     this.status = {
-      state: 'idle',
+      state: "idle",
       lastIndexedAt: new Date().toISOString(),
       totalDocs: 0,
       progress: null,
@@ -119,38 +134,44 @@ export class IndexService {
 
   async upsertPost(wpId: number): Promise<void> {
     const post = await this.wp.getSinglePost(wpId);
-    if (!post) throw new NotFoundException(`Post ${wpId} not found in WordPress`);
+    if (!post)
+      throw new NotFoundException(`Post ${wpId} not found in WordPress`);
 
     const projectRow = this.db.db
-      .prepare('SELECT project_slug, project_title, project_type FROM documents WHERE doc_type = ? AND project_slug = ?')
-      .get('project', post.post_type) as { project_slug: string; project_title: string; project_type: string } | undefined;
+      .prepare(
+        "SELECT project_slug, project_title, project_type FROM documents WHERE doc_type = ? AND project_slug = ?",
+      )
+      .get("project", post.post_type) as
+      | { project_slug: string; project_title: string; project_type: string }
+      | undefined;
 
     const project: Project = projectRow
       ? {
           slug: projectRow.project_slug,
           title: projectRow.project_title ?? post.post_type,
-          'project-type': projectRow.project_type as Project['project-type'],
-          author: '',
+          "project-type": projectRow.project_type as Project["project-type"],
+          author: "",
           tags: [],
-          'project-slug': projectRow.project_slug,
-          'description-short': '',
-          'description-long': '',
+          "project-slug": projectRow.project_slug,
+          "description-short": "",
+          "description-long": "",
         }
       : {
           slug: post.post_type,
           title: post.post_type,
-          'project-type': 'book',
-          author: '',
+          "project-type": "book",
+          author: "",
           tags: [],
-          'project-slug': post.post_type,
-          'description-short': '',
-          'description-long': '',
+          "project-slug": post.post_type,
+          "description-short": "",
+          "description-long": "",
         };
 
     const doc = postToDoc(post, project);
 
     this.db.db
-      .prepare(`
+      .prepare(
+        `
         INSERT INTO documents
           (wp_id, doc_type, project_slug, project_title, project_type, title, slug,
            permalink, excerpt, content, authors, author_bios, tags, image_url)
@@ -162,45 +183,81 @@ export class IndexService {
           excerpt=excluded.excerpt, content=excluded.content, authors=excluded.authors,
           author_bios=excluded.author_bios, tags=excluded.tags, image_url=excluded.image_url,
           indexed_at=datetime('now')
-      `)
+      `,
+      )
       .run(doc);
 
     const row = this.db.db
-      .prepare('SELECT id, title, authors, excerpt, content FROM documents WHERE wp_id = ?')
-      .get(wpId) as { id: number; title: string; authors: string; excerpt: string; content: string } | undefined;
+      .prepare(
+        "SELECT id, title, authors, excerpt, content FROM documents WHERE wp_id = ?",
+      )
+      .get(wpId) as
+      | {
+          id: number;
+          title: string;
+          authors: string;
+          excerpt: string;
+          content: string;
+        }
+      | undefined;
 
     if (row) await this.embedSingleDoc(row);
   }
 
   deletePost(wpId: number): void {
     const row = this.db.db
-      .prepare('SELECT id FROM documents WHERE wp_id = ?')
+      .prepare("SELECT id FROM documents WHERE wp_id = ?")
       .get(wpId);
-    if (!row) throw new NotFoundException(`Document with wp_id ${wpId} not in index`);
+    if (!row)
+      throw new NotFoundException(`Document with wp_id ${wpId} not in index`);
 
-    this.db.db.prepare('DELETE FROM embeddings WHERE document_id = (SELECT id FROM documents WHERE wp_id = ?)').run(wpId);
-    this.db.db.prepare('DELETE FROM chunks WHERE document_id = (SELECT id FROM documents WHERE wp_id = ?)').run(wpId);
-    this.db.db.prepare('DELETE FROM documents WHERE wp_id = ?').run(wpId);
+    this.db.db
+      .prepare(
+        "DELETE FROM embeddings WHERE document_id = (SELECT id FROM documents WHERE wp_id = ?)",
+      )
+      .run(wpId);
+    this.db.db
+      .prepare(
+        "DELETE FROM chunks WHERE document_id = (SELECT id FROM documents WHERE wp_id = ?)",
+      )
+      .run(wpId);
+    this.db.db.prepare("DELETE FROM documents WHERE wp_id = ?").run(wpId);
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
 
   private async runEmbeddingPhase(): Promise<void> {
     const rows = this.db.db
-      .prepare('SELECT id, title, authors, excerpt, content FROM documents')
-      .all() as Array<{ id: number; title: string; authors: string; excerpt: string; content: string }>;
+      .prepare("SELECT id, title, authors, excerpt, content FROM documents")
+      .all() as Array<{
+      id: number;
+      title: string;
+      authors: string;
+      excerpt: string;
+      content: string;
+    }>;
 
     const docJobs: Array<{ documentId: number; text: string }> = [];
-    const chunkJobs: Array<{ documentId: number; index: number; text: string; embedText: string }> = [];
+    const chunkJobs: Array<{
+      documentId: number;
+      index: number;
+      text: string;
+      embedText: string;
+    }> = [];
 
     for (const row of rows) {
-      const authorNames = safeJsonArray(row.authors).join(', ');
-      const docLike = { title: row.title, authors: authorNames, excerpt: row.excerpt ?? '', content: row.content ?? '' };
+      const authorNames = safeJsonArray(row.authors).join(", ");
+      const docLike = {
+        title: row.title,
+        authors: authorNames,
+        excerpt: row.excerpt ?? "",
+        content: row.content ?? "",
+      };
 
-      if (classifyDoc(docLike) === 'single') {
+      if (classifyDoc(docLike) === "single") {
         const text = [row.title, authorNames, row.excerpt, row.content]
           .filter(Boolean)
-          .join('\n')
+          .join("\n")
           .slice(0, TRUNCATE_LENGTH);
         docJobs.push({ documentId: row.id, text });
       } else {
@@ -208,51 +265,87 @@ export class IndexService {
       }
     }
 
-    const docVectors = await this.embeddings.embedAll(docJobs.map((j) => j.text));
+    const docVectors = await this.embeddings.embedAll(
+      docJobs.map((j) => j.text),
+    );
     const insertEmbed = this.db.db.prepare(
-      'INSERT OR REPLACE INTO embeddings (document_id, embedding) VALUES (?, ?)',
+      "INSERT OR REPLACE INTO embeddings (document_id, embedding) VALUES (?, ?)",
     );
     for (let i = 0; i < docJobs.length; i++) {
       if (docVectors[i]) {
-        insertEmbed.run(docJobs[i].documentId, float32ToBuffer(new Float32Array(docVectors[i]!)));
+        insertEmbed.run(
+          docJobs[i].documentId,
+          float32ToBuffer(new Float32Array(docVectors[i]!)),
+        );
       }
     }
 
-    const chunkVectors = await this.embeddings.embedAll(chunkJobs.map((j) => j.embedText));
+    const chunkVectors = await this.embeddings.embedAll(
+      chunkJobs.map((j) => j.embedText),
+    );
     const insertChunk = this.db.db.prepare(
-      'INSERT INTO chunks (document_id, chunk_index, text, embedding) VALUES (?, ?, ?, ?)',
+      "INSERT INTO chunks (document_id, chunk_index, text, embedding) VALUES (?, ?, ?, ?)",
     );
     for (let i = 0; i < chunkJobs.length; i++) {
       if (chunkVectors[i]) {
         const j = chunkJobs[i];
-        insertChunk.run(j.documentId, j.index, j.text, float32ToBuffer(new Float32Array(chunkVectors[i]!)));
+        insertChunk.run(
+          j.documentId,
+          j.index,
+          j.text,
+          float32ToBuffer(new Float32Array(chunkVectors[i]!)),
+        );
       }
     }
   }
 
-  private async embedSingleDoc(row: { id: number; title: string; authors: string; excerpt: string; content: string }): Promise<void> {
-    const authorNames = safeJsonArray(row.authors).join(', ');
-    const docLike = { title: row.title, authors: authorNames, excerpt: row.excerpt ?? '', content: row.content ?? '' };
+  private async embedSingleDoc(row: {
+    id: number;
+    title: string;
+    authors: string;
+    excerpt: string;
+    content: string;
+  }): Promise<void> {
+    const authorNames = safeJsonArray(row.authors).join(", ");
+    const docLike = {
+      title: row.title,
+      authors: authorNames,
+      excerpt: row.excerpt ?? "",
+      content: row.content ?? "",
+    };
 
-    this.db.db.prepare('DELETE FROM embeddings WHERE document_id = ?').run(row.id);
-    this.db.db.prepare('DELETE FROM chunks WHERE document_id = ?').run(row.id);
+    this.db.db
+      .prepare("DELETE FROM embeddings WHERE document_id = ?")
+      .run(row.id);
+    this.db.db.prepare("DELETE FROM chunks WHERE document_id = ?").run(row.id);
 
     try {
-      if (classifyDoc(docLike) === 'single') {
+      if (classifyDoc(docLike) === "single") {
         const text = [row.title, authorNames, row.excerpt, row.content]
-          .filter(Boolean).join('\n').slice(0, TRUNCATE_LENGTH);
+          .filter(Boolean)
+          .join("\n")
+          .slice(0, TRUNCATE_LENGTH);
         const [vector] = await this.embeddings.embedBatch([text]);
-        this.db.db.prepare('INSERT INTO embeddings (document_id, embedding) VALUES (?, ?)').run(
-          row.id, float32ToBuffer(new Float32Array(vector)),
-        );
+        this.db.db
+          .prepare(
+            "INSERT INTO embeddings (document_id, embedding) VALUES (?, ?)",
+          )
+          .run(row.id, float32ToBuffer(new Float32Array(vector)));
       } else {
         const chunks = buildChunks({ ...docLike, documentId: row.id });
-        const vectors = await this.embeddings.embedBatch(chunks.map((c) => c.embedText));
+        const vectors = await this.embeddings.embedBatch(
+          chunks.map((c) => c.embedText),
+        );
         const insertChunk = this.db.db.prepare(
-          'INSERT INTO chunks (document_id, chunk_index, text, embedding) VALUES (?, ?, ?, ?)',
+          "INSERT INTO chunks (document_id, chunk_index, text, embedding) VALUES (?, ?, ?, ?)",
         );
         chunks.forEach((c, i) => {
-          insertChunk.run(c.documentId, c.index, c.text, float32ToBuffer(new Float32Array(vectors[i])));
+          insertChunk.run(
+            c.documentId,
+            c.index,
+            c.text,
+            float32ToBuffer(new Float32Array(vectors[i])),
+          );
         });
       }
     } catch {
@@ -262,19 +355,21 @@ export class IndexService {
 
   private buildVocabulary(): void {
     const rows = this.db.db
-      .prepare('SELECT title, excerpt, content FROM documents')
+      .prepare("SELECT title, excerpt, content FROM documents")
       .all() as Array<{ title: string; excerpt: string; content: string }>;
 
     const freq = new Map<string, number>();
     for (const row of rows) {
-      const text = [row.title, row.excerpt, row.content].filter(Boolean).join(' ');
+      const text = [row.title, row.excerpt, row.content]
+        .filter(Boolean)
+        .join(" ");
       for (const word of text.toLowerCase().match(/\p{L}+/gu) ?? []) {
         if (word.length >= 3) freq.set(word, (freq.get(word) ?? 0) + 1);
       }
     }
 
     const insert = this.db.db.prepare(
-      'INSERT OR REPLACE INTO vocabulary (term, freq) VALUES (?, ?)',
+      "INSERT OR REPLACE INTO vocabulary (term, freq) VALUES (?, ?)",
     );
     const insertAll = this.db.db.transaction(() => {
       for (const [term, count] of freq) insert.run(term, count);
@@ -291,12 +386,15 @@ async function parallelLimit<T>(
   fn: (item: T) => Promise<void>,
 ): Promise<void> {
   const queue = [...items];
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (queue.length > 0) {
-      const item = queue.shift()!;
-      await fn(item);
-    }
-  });
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (queue.length > 0) {
+        const item = queue.shift()!;
+        await fn(item);
+      }
+    },
+  );
   await Promise.all(workers);
 }
 

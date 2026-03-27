@@ -37,7 +37,7 @@ export interface WPPost {
   permalink: string;
   image: [string, number, number, boolean] | null;
   credits: { autores: WPAuthor[] };
-  tags: WPTag[];
+  tags: WPTag[] | false;
 }
 
 // ── Database row types ───────────────────────────────────────────────────────
