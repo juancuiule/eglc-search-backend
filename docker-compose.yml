@@ -1,0 +1,23 @@
+services:
+  search:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - search-data:/data
+    environment:
+      WP_BASE_URL: ${WP_BASE_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      API_KEY: ${API_KEY}
+      DB_PATH: /data/search.db
+      PORT: 3000
+      EXCLUDED_SLUGS: ${EXCLUDED_SLUGS:-nopublicadas,espacio_negativo,clima_proceso}
+      EXCLUDED_TYPES: ${EXCLUDED_TYPES:-podcast,collection}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.search.rule=Host(`search.elgatoylacaja.com`)"
+      - "traefik.http.routers.search.entrypoints=websecure"
+      - "traefik.http.routers.search.tls.certresolver=letsencrypt"
+      - "traefik.http.services.search.loadbalancer.server.port=3000"
+
+volumes:
+  search-data:
