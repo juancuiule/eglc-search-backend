@@ -15,10 +15,12 @@ describe('CacheService', () => {
     expect(cache.get('hello world')).toEqual(results);
   });
 
-  it('normalizes query — same key for different casing/whitespace', () => {
-    cache.set('Hello World', [{ id: 1 }] as any);
-    expect(cache.get('  hello world  ')).toBeDefined();
-    expect(cache.get('HELLO WORLD')).toBeDefined();
+  it('uses the key as-is — no normalization, caller must normalize', () => {
+    cache.set('hello world', [{ id: 1 }] as any);
+    expect(cache.get('hello world')).toBeDefined();
+    // different casing is a cache miss — caller is responsible
+    expect(cache.get('Hello World')).toBeUndefined();
+    expect(cache.get('  hello world  ')).toBeUndefined();
   });
 
   it('returns undefined for expired entries', async () => {

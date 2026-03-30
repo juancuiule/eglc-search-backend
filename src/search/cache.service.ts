@@ -13,28 +13,24 @@ interface CacheEntry {
 export class CacheService {
   private readonly store = new Map<string, CacheEntry>();
 
-  private normalize(query: string): string {
-    return query.trim().toLowerCase();
+  private hash(key: string): string {
+    return createHash('sha256').update(key).digest('hex');
   }
 
-  private hash(query: string): string {
-    return createHash('sha256').update(this.normalize(query)).digest('hex');
-  }
-
-  get(query: string): SearchResult[] | undefined {
-    const key = this.hash(query);
-    const entry = this.store.get(key);
+  get(key: string): SearchResult[] | undefined {
+    const h = this.hash(key);
+    const entry = this.store.get(h);
     if (!entry) return undefined;
     if (Date.now() > entry.expiresAt) {
-      this.store.delete(key);
+      this.store.delete(h);
       return undefined;
     }
     return entry.results;
   }
 
-  set(query: string, results: SearchResult[]): void {
-    const key = this.hash(query);
-    this.store.set(key, { results, expiresAt: Date.now() + TTL_MS });
+  set(key: string, results: SearchResult[]): void {
+    const h = this.hash(key);
+    this.store.set(h, { results, expiresAt: Date.now() + TTL_MS });
   }
 
   clear(): void {
