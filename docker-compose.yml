@@ -8,10 +8,9 @@ services:
       - search-data:/data
     networks:
       - traefik-public
+    env_file:
+      - .env
     environment:
-      WP_BASE_URL: ${WP_BASE_URL}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      API_KEY: ${API_KEY}
       DB_PATH: /data/search.db
       PORT: 3000
       EXCLUDED_SLUGS: ${EXCLUDED_SLUGS:-nopublicadas,espacio_negativo,clima_proceso}
