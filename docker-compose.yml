@@ -16,12 +16,12 @@ services:
       PORT: 3000
       EXCLUDED_SLUGS: ${EXCLUDED_SLUGS:-nopublicadas,espacio_negativo,clima_proceso}
       EXCLUDED_TYPES: ${EXCLUDED_TYPES:-podcast,collection}
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.search.rule=Host(`search.elgatoylacaja.com`)"
-      - "traefik.http.routers.search.entrypoints=websecure"
-      - "traefik.http.routers.search.tls.certresolver=letsencrypt"
-      - "traefik.http.services.search.loadbalancer.server.port=3000"
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.search.rule=Host(`search.elgatoylacaja.com`)"
+        - "traefik.http.routers.search.entrypoints=web"
+        - "traefik.http.services.search.loadbalancer.server.port=3000"
 
 volumes:
   search-data:
