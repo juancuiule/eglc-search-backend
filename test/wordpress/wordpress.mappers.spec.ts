@@ -1,4 +1,4 @@
-import { postToDoc, projectToDoc } from '../../src/wordpress/wordpress.mappers';
+import { postToDoc, projectToDoc, stripHtml } from '../../src/wordpress/wordpress.mappers';
 import { WPPost, Project } from '../../src/shared/types';
 
 const mockProject: Project = {
@@ -15,6 +15,8 @@ const mockProject: Project = {
 
 const mockPost: WPPost = {
   id_post: 42,
+  status: true,
+  post_status: 'publish',
   title: 'Capítulo 1',
   slug: 'capitulo-1',
   post_type: 'el-libro',
@@ -24,6 +26,7 @@ const mockPost: WPPost = {
   image: ['https://example.com/cover.jpg', 800, 600, false],
   credits: { autores: [{ name: 'Ana García', description: 'Escritora' }] },
   tags: [{ term_id: 1, name: 'ficción', slug: 'ficcion' }],
+  metadata: { description: [], link: [], project: [] },
 };
 
 describe('projectToDoc', () => {
@@ -85,5 +88,57 @@ describe('postToDoc', () => {
   it('sets image_url to null when image is null', () => {
     const post = { ...mockPost, image: null };
     expect(postToDoc(post, mockProject).image_url).toBeNull();
+  });
+});
+
+describe('stripHtml', () => {
+  it('removes HTML tags', () => {
+    expect(stripHtml('<p>Hello</p>')).toBe('Hello');
+  });
+
+  it('decodes named entities', () => {
+    expect(stripHtml('&amp;')).toBe('&');
+    expect(stripHtml('&lt;')).toBe('<');
+    expect(stripHtml('&gt;')).toBe('>');
+    expect(stripHtml('&quot;')).toBe('"');
+    expect(stripHtml("&apos;")).toBe("'");
+    expect(stripHtml('hello&nbsp;world')).toBe('hello world');
+  });
+
+  it('decodes numeric entities', () => {
+    expect(stripHtml('&#65;')).toBe('A');
+    expect(stripHtml('&#x41;')).toBe('A');
+  });
+
+  it('collapses whitespace', () => {
+    expect(stripHtml('hello   world\n\ntest')).toBe('hello world test');
+  });
+
+  it('returns empty string for null input', () => {
+    expect(stripHtml(null)).toBe('');
+    expect(stripHtml(undefined)).toBe('');
+  });
+
+  it('strips HTML from content field in postToDoc', () => {
+    const post = { ...mockPost, content: '<p>Contenido <strong>del</strong> capítulo</p>' };
+    const doc = postToDoc(post, mockProject);
+    expect(doc.content).toBe('Contenido del capítulo');
+  });
+});
+
+describe('postToDoc metadata safety', () => {
+  it('does not crash when metadata is absent and excerpt is empty', () => {
+    const post = { ...mockPost, excerpt: '', metadata: undefined } as unknown as WPPost;
+    expect(() => postToDoc(post, mockProject)).not.toThrow();
+    expect(postToDoc(post, mockProject).excerpt).toBe('');
+  });
+
+  it('uses metadata.description[0] as excerpt fallback when excerpt is empty', () => {
+    const post = {
+      ...mockPost,
+      excerpt: '',
+      metadata: { description: ['Meta desc'], link: [], project: [] },
+    } as WPPost;
+    expect(postToDoc(post, mockProject).excerpt).toBe('Meta desc');
   });
 });

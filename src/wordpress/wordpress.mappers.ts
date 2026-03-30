@@ -1,5 +1,21 @@
 import { DocumentRow, Project, WPPost } from "../shared/types";
 
+export function stripHtml(html: string | null | undefined): string {
+  if (!html) return '';
+  return html
+    .replace(/<[^>]*>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, '\u00a0')
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#([0-9]+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function projectToDoc(project: Project): DocumentRow {
   return {
     wp_id: null,
@@ -20,14 +36,11 @@ export function projectToDoc(project: Project): DocumentRow {
 }
 
 export function postToDoc(post: WPPost, project: Project): DocumentRow {
-  const excerpt =
+  const rawExcerpt =
     post.excerpt && post.excerpt.length > 0
       ? post.excerpt
-      : post.metadata.description && post.metadata.description.length > 0
-        ? post.metadata.description[0]
-        : "";
+      : post.metadata?.description?.[0] ?? '';
 
-  // console.log(post);
   return {
     wp_id: post.id_post,
     doc_type: "post",
@@ -37,8 +50,8 @@ export function postToDoc(post: WPPost, project: Project): DocumentRow {
     title: post.title,
     slug: post.slug,
     permalink: post.permalink ?? null,
-    excerpt,
-    content: post.content ?? null,
+    excerpt: stripHtml(rawExcerpt),
+    content: stripHtml(post.content),
     authors: JSON.stringify(post.credits?.autores?.map((a) => a.name) ?? []),
     author_bios: JSON.stringify(
       post.credits?.autores?.map((a) => a.description) ?? [],
