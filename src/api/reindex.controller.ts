@@ -34,4 +34,11 @@ export class ReindexController {
     this.cache.clear();
     return { message: 'Document deleted' };
   }
+
+  @Post('project/:slug')
+  @HttpCode(HttpStatus.ACCEPTED)
+  startProjectReindex(@Param('slug') slug: string) {
+    this.indexService.startProjectReindex(slug);
+    return { message: 'Project reindex started' };
+  }
 }

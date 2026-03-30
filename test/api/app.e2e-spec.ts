@@ -135,4 +135,19 @@ describe('App E2E', () => {
       .set('X-API-Key', 'test-api-key');
     expect(res.status).toBe(404);
   });
+
+  // ── POST /api/reindex/project/:slug ─────────────────────────────────────────
+
+  it('POST /api/reindex/project/:slug returns 401 without API key', async () => {
+    const res = await request(app.getHttpServer()).post('/api/reindex/project/my-book');
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /api/reindex/project/:slug returns 202 with valid API key', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/reindex/project/my-book')
+      .set('X-API-Key', 'test-api-key');
+    expect(res.status).toBe(202);
+    expect(res.body.message).toBe('Project reindex started');
+  });
 });

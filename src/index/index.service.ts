@@ -137,6 +137,107 @@ export class IndexService {
     };
   }
 
+  startProjectReindex(slug: string): void {
+    if (this.status.state === "running") {
+      throw new ConflictException("Reindex already running");
+    }
+    this.runProjectReindex(slug).catch((err) => {
+      this.logger.error(`Project reindex failed for ${slug}`, err);
+      this.status = {
+        state: "idle",
+        lastIndexedAt: this.status.lastIndexedAt,
+        progress: null,
+      };
+    });
+  }
+
+  async runProjectReindex(slug: string): Promise<void> {
+    this.status = {
+      state: "running",
+      lastIndexedAt: null,
+      progress: { current: 0, total: 0 },
+    };
+
+    // Get all projects and find the one with given slug
+    const allProjects = await this.wp.getProjects();
+    const project = allProjects.find((p) => p.slug === slug);
+
+    // If not found, reset to idle
+    if (!project) {
+      this.status = {
+        state: "idle",
+        lastIndexedAt: this.status.lastIndexedAt,
+        progress: null,
+      };
+      return;
+    }
+
+    // Check if excluded
+    if (
+      this.excludedSlugs.has(project.slug) ||
+      this.excludedTypes.has(project["project-type"])
+    ) {
+      this.status = {
+        state: "idle",
+        lastIndexedAt: this.status.lastIndexedAt,
+        progress: null,
+      };
+      return;
+    }
+
+    // Delete existing docs for this project
+    this.db.db
+      .prepare(
+        "DELETE FROM embeddings WHERE document_id IN (SELECT id FROM documents WHERE project_slug = ?)",
+      )
+      .run(slug);
+    this.db.db
+      .prepare(
+        "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE project_slug = ?)",
+      )
+      .run(slug);
+    this.db.db
+      .prepare("DELETE FROM documents WHERE project_slug = ?")
+      .run(slug);
+
+    // Insert project doc
+    const insertDoc = this.db.db.prepare(`
+      INSERT INTO documents
+        (wp_id, doc_type, project_slug, project_title, project_type, title, slug,
+         permalink, excerpt, content, authors, author_bios, tags, image_url)
+      VALUES
+        (@wp_id, @doc_type, @project_slug, @project_title, @project_type, @title,
+         @slug, @permalink, @excerpt, @content, @authors, @author_bios, @tags, @image_url)
+    `);
+
+    insertDoc.run(projectToDoc(project));
+
+    // Fetch and insert posts
+    let posts: WPPost[] = [];
+    try {
+      posts = await this.wp.getPosts(slug);
+    } catch (err) {
+      this.logger.error(`Failed to fetch posts for ${slug}`, err);
+    }
+
+    for (const post of posts) {
+      insertDoc.run(postToDoc(post, project));
+    }
+
+    // Run embedding phase
+    await this.runEmbeddingPhase();
+
+    // Clear cache
+    this.cache.clear();
+
+    // Finalize status
+    this.status = {
+      state: "idle",
+      lastIndexedAt: new Date().toISOString(),
+      progress: null,
+    };
+  }
+
   async upsertPost(wpId: number): Promise<void> {
     const post = await this.wp.getSinglePost(wpId);
     if (!post)

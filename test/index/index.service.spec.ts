@@ -155,4 +155,58 @@ describe('IndexService', () => {
     expect(db.db.prepare('SELECT * FROM documents WHERE wp_id = 88').get()).toBeUndefined();
     expect(db.db.prepare(`SELECT * FROM embeddings WHERE document_id = ${docId}`).get()).toBeUndefined();
   });
+
+  describe('startProjectReindex', () => {
+    it('throws ConflictException if already running', () => {
+      (service as any).status.state = 'running';
+      expect(() => service.startProjectReindex('my-book')).toThrow();
+      (service as any).status.state = 'idle';
+    });
+
+    it('resets state to idle when slug is not found in projects.json', async () => {
+      mockWpService.getProjects.mockResolvedValue([]);
+      await service.runProjectReindex('no-such-slug');
+      expect(service.getStatus().state).toBe('idle');
+    });
+
+    it('resets state to idle when slug is excluded', async () => {
+      mockWpService.getProjects.mockResolvedValue([
+        {
+          slug: 'nopublicadas', 'project-type': 'book', title: 'X',
+          author: '', tags: [], 'project-slug': 'nopublicadas',
+          'description-short': '', 'description-long': '',
+        },
+      ]);
+      await service.runProjectReindex('nopublicadas');
+      expect(service.getStatus().state).toBe('idle');
+    });
+
+    it('inserts project doc and posts, clears cache', async () => {
+      mockWpService.getProjects.mockResolvedValue([
+        {
+          slug: 'my-book', 'project-type': 'book', title: 'My Book',
+          author: 'A', tags: [], 'project-slug': 'my-book',
+          'description-short': '', 'description-long': '',
+        },
+      ]);
+      mockWpService.getPosts.mockResolvedValue([
+        {
+          id_post: 10, title: 'Ch 1', slug: 'ch-1', post_type: 'my-book', status: true, post_status: 'publish',
+          excerpt: 'ex', content: 'con', permalink: 'https://ex.com',
+          image: null, credits: { autores: [] }, tags: [],
+          metadata: { description: [], link: [], project: [] },
+        },
+      ]);
+      mockEmbeddingService.embedAll.mockResolvedValue([new Float32Array([0.1, 0.2])]);
+
+      await service.runProjectReindex('my-book');
+
+      const count = db.db
+        .prepare("SELECT COUNT(*) as c FROM documents WHERE project_slug = 'my-book'")
+        .get() as { c: number };
+      expect(count.c).toBe(2); // project doc + 1 post
+      expect(mockCacheService.clear).toHaveBeenCalled();
+      expect(service.getStatus().state).toBe('idle');
+    });
+  });
 });
