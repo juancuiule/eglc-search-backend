@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   search:
-    build: .
+    image: search-backend:latest
     restart: unless-stopped
     volumes:
       - search-data:/data
