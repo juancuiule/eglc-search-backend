@@ -60,7 +60,7 @@ export class WordPressService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         args: JSON.stringify({
-          post_type: ['any'],
+          // post_type: ['any'],
           posts_per_page: 1,
           paged: 1,
           post__in: [wpId],
