@@ -91,6 +91,9 @@ export class SearchService {
         const cosine = queryEmbedding
           ? this.cosineForDoc(row.id, queryEmbedding)
           : 0;
+        console.log(
+          `Doc ${row.id} — BM25 norm: ${bm25Norm.toFixed(4)}, Cosine: ${cosine.toFixed(4)}`,
+        );
         const finalScore = bm25Norm * 0.4 + cosine * 0.6;
         return { row, finalScore };
       })

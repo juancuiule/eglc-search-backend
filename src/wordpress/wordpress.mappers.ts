@@ -20,7 +20,14 @@ export function projectToDoc(project: Project): DocumentRow {
 }
 
 export function postToDoc(post: WPPost, project: Project): DocumentRow {
-  console.log(post);
+  const excerpt =
+    post.excerpt && post.excerpt.length > 0
+      ? post.excerpt
+      : post.metadata.description && post.metadata.description.length > 0
+        ? post.metadata.description[0]
+        : "";
+
+  // console.log(post);
   return {
     wp_id: post.id_post,
     doc_type: "post",
@@ -30,7 +37,7 @@ export function postToDoc(post: WPPost, project: Project): DocumentRow {
     title: post.title,
     slug: post.slug,
     permalink: post.permalink ?? null,
-    excerpt: post.excerpt ?? "",
+    excerpt,
     content: post.content ?? null,
     authors: JSON.stringify(post.credits?.autores?.map((a) => a.name) ?? []),
     author_bios: JSON.stringify(

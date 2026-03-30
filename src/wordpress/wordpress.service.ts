@@ -17,6 +17,17 @@ export class WordPressService {
     return res.json() as Promise<Project[]>;
   }
 
+  async getProjectFromPost(post: WPPost): Promise<Project | null> {
+    const projects = await this.getProjects();
+    const project = projects.find((p) => p.slug === post.post_type);
+    if (!project) {
+      this.logger.warn(
+        `No project found for post ${post.id_post} with type ${post.post_type}`,
+      );
+    }
+    return project ?? null;
+  }
+
   async getPosts(projectSlug: string): Promise<WPPost[]> {
     const res = await fetch(`${this.baseUrl}/wp-json/api/gato_get_posts/`, {
       method: "POST",
@@ -44,22 +55,19 @@ export class WordPressService {
   }
 
   async getSinglePost(wpId: number): Promise<WPPost | null> {
-    this.logger.log(`Fetching post with WP ID ${wpId}`);
     const res = await fetch(`${this.baseUrl}/wp-json/api/gato_get_posts/`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         args: JSON.stringify({
           paged: 1,
-          post__in: [34615],
-          
+          post__in: [wpId],
         }),
         reduced: false,
       }),
     });
     if (!res.ok) throw new Error(`Failed to fetch post ${wpId}: ${res.status}`);
     const data = await res.json();
-    this.logger.log(`Received data for post ${wpId}: ${JSON.stringify(data)}`);
     const posts: WPPost[] = Array.isArray(data) ? data : [];
     return posts[0] ?? null;
   }

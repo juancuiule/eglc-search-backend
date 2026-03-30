@@ -1,19 +1,24 @@
 // ── WordPress API types ──────────────────────────────────────────────────────
 
-export type ProjectType = 'book' | 'podcast' | 'collection' | 'newsletter' | 'post';
+export type ProjectType =
+  | "book"
+  | "podcast"
+  | "collection"
+  | "newsletter"
+  | "post";
 
 export interface Project {
   tags: string[];
   author: string;
   title: string;
-  'short-title'?: string;
-  'description-short': string;
-  'description-long': string;
-  'project-slug': string;
+  "short-title"?: string;
+  "description-short": string;
+  "description-long": string;
+  "project-slug": string;
   slug: string;
-  'project-type': ProjectType;
-  'project-product-image'?: string;
-  'og-image'?: string;
+  "project-type": ProjectType;
+  "project-product-image"?: string;
+  "og-image"?: string;
 }
 
 export interface WPAuthor {
@@ -27,24 +32,33 @@ export interface WPTag {
   slug: string;
 }
 
+export interface WPMetadata {
+  link: string[];
+  description: string[];
+  project: string[];
+}
+
 export interface WPPost {
   id_post: number;
+  status: boolean;
+  post_status: "publish" | string;
+  credits: { autores: WPAuthor[] };
+  excerpt: string;
   title: string;
   slug: string;
   post_type: string;
-  excerpt: string;
   content?: string;
   permalink: string;
   image: [string, number, number, boolean] | null;
-  credits: { autores: WPAuthor[] };
   tags: WPTag[] | false;
+  metadata: WPMetadata;
 }
 
 // ── Database row types ───────────────────────────────────────────────────────
 
 export interface DocumentRow {
   wp_id: number | null;
-  doc_type: 'project' | 'post';
+  doc_type: "project" | "post";
   project_slug: string;
   project_title: string;
   project_type: string;
@@ -53,9 +67,9 @@ export interface DocumentRow {
   permalink: string | null;
   excerpt: string;
   content: string | null;
-  authors: string;      // JSON: string[]
-  author_bios: string;  // JSON: string[]
-  tags: string;         // JSON: string[]
+  authors: string; // JSON: string[]
+  author_bios: string; // JSON: string[]
+  tags: string; // JSON: string[]
   image_url: string | null;
 }
 
@@ -67,7 +81,7 @@ export interface DocumentDbRow extends DocumentRow {
 // ── Index status ─────────────────────────────────────────────────────────────
 
 export interface IndexStatus {
-  state: 'idle' | 'running';
+  state: "idle" | "running";
   lastIndexedAt: string | null;
   totalDocs: number;
   progress: { current: number; total: number } | null;
@@ -77,7 +91,7 @@ export interface IndexStatus {
 
 export interface SearchResult {
   id: number;
-  doc_type: 'project' | 'post';
+  doc_type: "project" | "post";
   project_slug: string;
   project_title: string;
   project_type: string;

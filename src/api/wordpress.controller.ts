@@ -1,14 +1,39 @@
-import { Controller, Get } from "@nestjs/common";
+import {
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe
+} from "@nestjs/common";
+import { postToDoc } from "src/wordpress/wordpress.mappers";
 import { WordPressService } from "src/wordpress/wordpress.service";
 
 @Controller("api")
 export class WordpressController {
   constructor(private readonly wordpressService: WordPressService) {}
 
-  @Get("wordpress")
-  async status() {
-    const post = await this.wordpressService.getSinglePost(34615);
+  @Get("wordpress/:postId")
+  async status(
+    @Param("postId", new ParseIntPipe())
+    postId: number,
+  ) {
+    console.log(`Received request for post ID ${postId}`);
+    const post = await this.wordpressService.getSinglePost(postId);
 
-    return post;
+    if (!post) {
+      console.log(`Post with ID ${postId} not found`);
+      return { error: "Post not found" };
+    }
+
+    const project = await this.wordpressService.getProjectFromPost(post);
+
+    if (!project) {
+      console.log(`Project for post ID ${postId} not found`);
+      return { error: "Project not found for this post" };
+    }
+
+    const doc = postToDoc(post, project);
+
+    return { doc };
+    // return { post, project, doc };
   }
 }

@@ -82,6 +82,7 @@ export class IndexService {
     // ── Phase 1: content ─────────────────────────────────────────────────────
     this.db.resetSchema();
 
+
     const allProjects = await this.wp.getProjects();
     const projects = allProjects.filter(
       (p) =>
@@ -89,9 +90,8 @@ export class IndexService {
         !this.excludedTypes.has(p["project-type"]),
     );
 
+    this.logger.log(`Indexing ${projects.length} projects (excluded ${allProjects.length - projects.length})`);
     this.status.progress = { current: 0, total: projects.length };
-
-    console.log(`Indexing ${projects.length} projects...`);
 
     const insertDoc = this.db.db.prepare(`
       INSERT INTO documents
@@ -121,7 +121,9 @@ export class IndexService {
 
     this.buildVocabulary();
 
+
     // ── Phase 2: embeddings ──────────────────────────────────────────────────
+    
     await this.runEmbeddingPhase();
 
     this.status = {
@@ -224,7 +226,7 @@ export class IndexService {
     this.db.db.prepare("DELETE FROM documents WHERE wp_id = ?").run(wpId);
   }
 
-  // ── Private helpers ────────────────────────────────────────────────────────
+  // ── Embedding phase ────────────────────────────────────────────────────────
 
   private async runEmbeddingPhase(): Promise<void> {
     const rows = this.db.db
@@ -247,6 +249,7 @@ export class IndexService {
 
     for (const row of rows) {
       const authorNames = safeJsonArray(row.authors).join(", ");
+
       const docLike = {
         title: row.title,
         authors: authorNames,
@@ -259,43 +262,52 @@ export class IndexService {
           .filter(Boolean)
           .join("\n")
           .slice(0, TRUNCATE_LENGTH);
+
         docJobs.push({ documentId: row.id, text });
       } else {
         chunkJobs.push(...buildChunks({ ...docLike, documentId: row.id }));
       }
     }
 
-    const docVectors = await this.embeddings.embedAll(
-      docJobs.map((j) => j.text),
-    );
     const insertEmbed = this.db.db.prepare(
       "INSERT OR REPLACE INTO embeddings (document_id, embedding) VALUES (?, ?)",
     );
-    for (let i = 0; i < docJobs.length; i++) {
-      if (docVectors[i]) {
-        insertEmbed.run(
-          docJobs[i].documentId,
-          float32ToBuffer(new Float32Array(docVectors[i]!)),
-        );
-      }
-    }
 
-    const chunkVectors = await this.embeddings.embedAll(
-      chunkJobs.map((j) => j.embedText),
-    );
     const insertChunk = this.db.db.prepare(
       "INSERT INTO chunks (document_id, chunk_index, text, embedding) VALUES (?, ?, ?, ?)",
     );
+
+    // Docs
+    const docVectors = await this.embeddings.embedAll(
+      docJobs.map((j) => j.text),
+    );
+
+    for (let i = 0; i < docJobs.length; i++) {
+      const job = docJobs[i];
+      const v = docVectors[i];
+
+      if (!job || v == null) continue;
+
+      insertEmbed.run(job.documentId, float32ToBuffer(new Float32Array(v)));
+    }
+
+    // Chunks
+    const chunkVectors = await this.embeddings.embedAll(
+      chunkJobs.map((j) => j.embedText),
+    );
+
     for (let i = 0; i < chunkJobs.length; i++) {
-      if (chunkVectors[i]) {
-        const j = chunkJobs[i];
-        insertChunk.run(
-          j.documentId,
-          j.index,
-          j.text,
-          float32ToBuffer(new Float32Array(chunkVectors[i]!)),
-        );
-      }
+      const j = chunkJobs[i];
+      const v = chunkVectors[i];
+
+      if (!j || v == null) continue;
+
+      insertChunk.run(
+        j.documentId,
+        j.index,
+        j.text,
+        float32ToBuffer(new Float32Array(v)),
+      );
     }
   }
 
@@ -307,6 +319,7 @@ export class IndexService {
     content: string;
   }): Promise<void> {
     const authorNames = safeJsonArray(row.authors).join(", ");
+
     const docLike = {
       title: row.title,
       authors: authorNames,
@@ -325,7 +338,12 @@ export class IndexService {
           .filter(Boolean)
           .join("\n")
           .slice(0, TRUNCATE_LENGTH);
-        const [vector] = await this.embeddings.embedBatch([text]);
+
+        const vectors = await this.embeddings.embedBatch([text]);
+        const vector = vectors[0];
+
+        if (!vector) return;
+
         this.db.db
           .prepare(
             "INSERT INTO embeddings (document_id, embedding) VALUES (?, ?)",
@@ -333,23 +351,31 @@ export class IndexService {
           .run(row.id, float32ToBuffer(new Float32Array(vector)));
       } else {
         const chunks = buildChunks({ ...docLike, documentId: row.id });
+
         const vectors = await this.embeddings.embedBatch(
           chunks.map((c) => c.embedText),
         );
+
         const insertChunk = this.db.db.prepare(
           "INSERT INTO chunks (document_id, chunk_index, text, embedding) VALUES (?, ?, ?, ?)",
         );
-        chunks.forEach((c, i) => {
+
+        for (let i = 0; i < chunks.length; i++) {
+          const c = chunks[i];
+          const v = vectors[i];
+
+          if (!c || !v) continue;
+
           insertChunk.run(
             c.documentId,
             c.index,
             c.text,
-            float32ToBuffer(new Float32Array(vectors[i])),
+            float32ToBuffer(new Float32Array(v)),
           );
-        });
+        }
       }
     } catch {
-      this.logger.warn(`Failed to embed document ${row.id} — stored FTS-only`);
+      this.logger.warn(`Failed to embed document ${row.id}`);
     }
   }
 
@@ -359,22 +385,30 @@ export class IndexService {
       .all() as Array<{ title: string; excerpt: string; content: string }>;
 
     const freq = new Map<string, number>();
+
     for (const row of rows) {
       const text = [row.title, row.excerpt, row.content]
         .filter(Boolean)
         .join(" ");
+
       for (const word of text.toLowerCase().match(/\p{L}+/gu) ?? []) {
-        if (word.length >= 3) freq.set(word, (freq.get(word) ?? 0) + 1);
+        if (word.length >= 3) {
+          freq.set(word, (freq.get(word) ?? 0) + 1);
+        }
       }
     }
 
     const insert = this.db.db.prepare(
       "INSERT OR REPLACE INTO vocabulary (term, freq) VALUES (?, ?)",
     );
-    const insertAll = this.db.db.transaction(() => {
-      for (const [term, count] of freq) insert.run(term, count);
+
+    const tx = this.db.db.transaction(() => {
+      for (const [term, count] of freq) {
+        insert.run(term, count);
+      }
     });
-    insertAll();
+
+    tx();
   }
 }
 
@@ -386,6 +420,7 @@ async function parallelLimit<T>(
   fn: (item: T) => Promise<void>,
 ): Promise<void> {
   const queue = [...items];
+
   const workers = Array.from(
     { length: Math.min(limit, items.length) },
     async () => {
@@ -395,6 +430,7 @@ async function parallelLimit<T>(
       }
     },
   );
+
   await Promise.all(workers);
 }
 
