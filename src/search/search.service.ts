@@ -33,6 +33,17 @@ interface FtsRow {
   tags: string;
   image_url: string | null;
   content: string | null;
+  // snippet columns (fragment length 64 — matches spec)
+  snippet_content: string;
+  snippet_excerpt: string;
+  // matched-field markers: non-empty string means the field matched the query
+  m_title: string;
+  m_excerpt: string;
+  m_content: string;
+  m_authors: string;
+  m_author_bios: string;
+  m_tags: string;
+  m_project_title: string;
 }
 
 @Injectable()
@@ -49,36 +60,32 @@ export class SearchService {
     query: string,
     limit: number,
     skip: number,
-  ): Promise<{
-    results: SearchResult[];
-    total: number;
-  }> {
-    const cached = this.cache.get(query);
-    if (cached)
-      return {
-        results: cached.slice(skip, skip + limit),
-        total: cached.length,
-      };
+  ): Promise<{ results: SearchResult[]; total: number }> {
+    // Normalize once — all downstream calls receive `normalized`
+    const normalized = query.trim().toLowerCase();
+
+    const cached = this.cache.get(normalized);
+    if (cached) {
+      return { results: cached.slice(skip, skip + limit), total: cached.length };
+    }
 
     // 1. FTS5 match — early return if no results
-    const ftsRows = this.runFts(query);
+    const ftsRows = this.runFts(normalized);
     if (ftsRows.length === 0) {
-      this.cache.set(query, []);
+      this.cache.set(normalized, []);
       return { results: [], total: 0 };
     }
 
     // 2. Compute query embedding (only when FTS has results)
     let queryEmbedding: Float32Array | null = null;
     try {
-      const [vec] = await this.embeddingService.embedBatch([
-        query.trim().toLowerCase(),
-      ]);
+      const [vec] = await this.embeddingService.embedBatch([normalized]);
       queryEmbedding = new Float32Array(vec);
     } catch {
       this.logger.warn("Query embedding failed — using FTS5-only ranking");
     }
 
-    // 3. Normalize BM25 scores (rank is negative; lower = more relevant) — queryEmbedding already computed above
+    // 3. Normalize BM25 scores (rank is negative; lower = more relevant)
     const ranks = ftsRows.map((r) => r.rank);
     const minRank = Math.min(...ranks);
     const maxRank = Math.max(...ranks);
@@ -91,20 +98,17 @@ export class SearchService {
         const cosine = queryEmbedding
           ? this.cosineForDoc(row.id, queryEmbedding)
           : 0;
-        console.log(
-          `Doc ${row.id} — BM25 norm: ${bm25Norm.toFixed(4)}, Cosine: ${cosine.toFixed(4)}`,
-        );
         const finalScore = bm25Norm * 0.4 + cosine * 0.6;
         return { row, finalScore };
       })
       .sort((a, b) => b.finalScore - a.finalScore);
 
-    // 5. Build SearchResult[]
+    // 5. Build SearchResult[] — snippets and matchedFields come directly from runFts columns
+    //    (no extra DB queries: getSnippets and getMatchedFields are eliminated)
     const results: SearchResult[] = scored.map(({ row, finalScore }) => {
-      const { snippetContent, snippetExcerpt, matchedFields } =
-        this.getSnippets(row.id, query);
       const authorArr: string[] = safeJsonArray(row.authors);
       const tagArr: string[] = safeJsonArray(row.tags);
+      const matchedFields = FTS5_FIELDS.filter((f) => !!(row as any)[`m_${f}`]);
 
       return {
         id: row.id,
@@ -120,19 +124,19 @@ export class SearchService {
         tags: tagArr.length > 0 ? tagArr.join(",") : null,
         image_url: row.image_url,
         rank: finalScore,
-        snippet_content: snippetContent,
-        snippet_excerpt: snippetExcerpt,
+        snippet_content: row.snippet_content ?? "",
+        snippet_excerpt: row.snippet_excerpt ?? "",
         matchedFields,
       };
     });
 
-    this.cache.set(query, results);
-    return { results: results.slice(skip, skip + limit), total: scored.length };
+    this.cache.set(normalized, results);
+    return { results: results.slice(skip, skip + limit), total: results.length };
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────
 
-  private runFts(query: string): FtsRow[] {
+  private runFts(normalized: string): FtsRow[] {
     try {
       return this.db.db
         .prepare(
@@ -142,8 +146,8 @@ export class SearchService {
             d.title, d.slug, d.permalink, d.excerpt, d.authors,
             d.tags, d.image_url,
             bm25(documents_fts, 50, 8, 1, 4, 0.5, 6, 3) as rank,
-            snippet(documents_fts, 2, '<mark>', '</mark>', '…', 30) as snippet_content,
-            snippet(documents_fts, 1, '<mark>', '</mark>', '…', 30) as snippet_excerpt,
+            snippet(documents_fts, 2, '<mark>', '</mark>', '…', 64) as snippet_content,
+            snippet(documents_fts, 1, '<mark>', '</mark>', '…', 64) as snippet_excerpt,
             snippet(documents_fts, 0, '<mark>', '</mark>', '', 1)    as m_title,
             snippet(documents_fts, 1, '<mark>', '</mark>', '', 1)    as m_excerpt,
             snippet(documents_fts, 2, '<mark>', '</mark>', '', 1)    as m_content,
@@ -157,8 +161,9 @@ export class SearchService {
           ORDER BY rank
         `,
         )
-        .all(query.trim().toLowerCase()) as FtsRow[];
-    } catch {
+        .all(normalized) as FtsRow[];
+    } catch (err) {
+      this.logger.warn("FTS5 query failed", err);
       return [];
     }
   }
@@ -169,10 +174,7 @@ export class SearchService {
       .get(docId) as { embedding: Buffer } | undefined;
 
     if (embRow) {
-      return cosineSimilarity(
-        queryEmbedding,
-        bufferToFloat32(embRow.embedding),
-      );
+      return cosineSimilarity(queryEmbedding, bufferToFloat32(embRow.embedding));
     }
 
     const chunkRows = this.db.db
@@ -186,58 +188,6 @@ export class SearchService {
         cosineSimilarity(queryEmbedding, bufferToFloat32(c.embedding)),
       ),
     );
-  }
-
-  private getSnippets(
-    docId: number,
-    query: string,
-  ): {
-    snippetContent: string;
-    snippetExcerpt: string;
-    matchedFields: string[];
-  } {
-    try {
-      const row = this.db.db
-        .prepare(
-          `
-          SELECT
-            snippet(documents_fts, 2, '<mark>', '</mark>', '...', 64) as snip_content,
-            snippet(documents_fts, 1, '<mark>', '</mark>', '...', 64) as snip_excerpt
-          FROM documents_fts
-          WHERE documents_fts MATCH ? AND rowid = ?
-        `,
-        )
-        .get(query.trim().toLowerCase(), docId) as
-        | { snip_content: string; snip_excerpt: string }
-        | undefined;
-
-      const matchedFields = this.getMatchedFields(docId, query);
-
-      return {
-        snippetContent: row?.snip_content ?? "",
-        snippetExcerpt: row?.snip_excerpt ?? "",
-        matchedFields,
-      };
-    } catch {
-      return { snippetContent: "", snippetExcerpt: "", matchedFields: [] };
-    }
-  }
-
-  private getMatchedFields(docId: number, query: string): string[] {
-    const matched: string[] = [];
-    for (let i = 0; i < FTS5_FIELDS.length; i++) {
-      try {
-        const row = this.db.db
-          .prepare(
-            `SELECT snippet(documents_fts, ${i}, '', '', '', 1) as s FROM documents_fts WHERE documents_fts MATCH ? AND rowid = ?`,
-          )
-          .get(query.trim().toLowerCase(), docId) as { s: string } | undefined;
-        if (row?.s) matched.push(FTS5_FIELDS[i]);
-      } catch {
-        // column had no match
-      }
-    }
-    return matched;
   }
 }
 

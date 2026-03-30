@@ -36,9 +36,9 @@ describe('SearchService', () => {
     jest.clearAllMocks();
   });
 
-  it('returns empty array when no documents are indexed', async () => {
-    const results = await service.search('anything', 10);
-    expect(results).toEqual([]);
+  it('returns empty results when no documents are indexed', async () => {
+    const result = await service.search('anything', 10, 0);
+    expect(result).toEqual({ results: [], total: 0 });
   });
 
   it('returns FTS5 results for matching query', async () => {
@@ -47,9 +47,10 @@ describe('SearchService', () => {
       VALUES ('post', 'proj', 'Project', 'book', 'El gato mágico', 'el-gato', '[]', '[]', '[]', 'Extracto', 'Contenido sobre gatos')
     `).run();
 
-    const results = await service.search('gato', 10);
-    expect(results.length).toBeGreaterThan(0);
-    expect(results[0].title).toBe('El gato mágico');
+    const result = await service.search('gato', 10, 0);
+    expect(result.results.length).toBeGreaterThan(0);
+    expect(result.results[0].title).toBe('El gato mágico');
+    expect(result.total).toBeGreaterThan(0);
   });
 
   it('respects the limit parameter', async () => {
@@ -60,8 +61,26 @@ describe('SearchService', () => {
       `).run();
     }
 
-    const results = await service.search('test', 2);
-    expect(results.length).toBeLessThanOrEqual(2);
+    const result = await service.search('test', 2, 0);
+    expect(result.results.length).toBeLessThanOrEqual(2);
+    expect(result.total).toBeGreaterThan(0);
+  });
+
+  it('skip offsets results correctly', async () => {
+    for (let i = 0; i < 3; i++) {
+      db.db.prepare(`
+        INSERT INTO documents (doc_type, project_slug, title, slug, authors, author_bios, tags, excerpt, content)
+        VALUES ('post', 'proj', 'Page doc ${i}', 'slug-p${i}', '[]', '[]', '[]', 'paging text', 'paging text common')
+      `).run();
+    }
+
+    const page1 = await service.search('paging', 2, 0);
+    const page2 = await service.search('paging', 2, 2);
+    expect(page1.results.length).toBe(2);
+    expect(page2.results.length).toBeGreaterThanOrEqual(1);
+    const ids1 = page1.results.map((r) => r.id);
+    const ids2 = page2.results.map((r) => r.id);
+    expect(ids1.every((id) => !ids2.includes(id))).toBe(true);
   });
 
   it('serializes authors JSON array to comma-joined string', async () => {
@@ -70,8 +89,8 @@ describe('SearchService', () => {
       VALUES ('post', 'proj', 'Libro', 'libro', '["Ana García","Pedro López"]', '[]', '[]', 'libro texto', 'libro texto')
     `).run();
 
-    const results = await service.search('libro', 10);
-    expect(results[0]?.authors).toBe('Ana García,Pedro López');
+    const result = await service.search('libro', 10, 0);
+    expect(result.results[0]?.authors).toBe('Ana García,Pedro López');
   });
 
   it('returns null for tags when tags array is empty', async () => {
@@ -80,19 +99,29 @@ describe('SearchService', () => {
       VALUES ('post', 'proj', 'Notag', 'notag', '[]', '[]', '[]', 'notag text', 'notag text')
     `).run();
 
-    const results = await service.search('notag', 10);
-    expect(results[0]?.tags).toBeNull();
+    const result = await service.search('notag', 10, 0);
+    expect(result.results[0]?.tags).toBeNull();
   });
 
   it('uses cache on second call with same query', async () => {
-    // seed a doc so FTS returns a result and embedBatch is called
     db.db.prepare(`
       INSERT INTO documents (doc_type, project_slug, title, slug, authors, author_bios, tags, excerpt, content)
       VALUES ('post', 'proj', 'cached query result', 'cached', '[]', '[]', '[]', 'cached query', 'cached query text')
     `).run();
 
-    await service.search('cached', 10);
-    await service.search('cached', 10);
+    await service.search('cached', 10, 0);
+    await service.search('cached', 10, 0);
+    expect(mockEmbeddingService.embedBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('normalizes query before caching — UPPERCASE hits same cache entry', async () => {
+    db.db.prepare(`
+      INSERT INTO documents (doc_type, project_slug, title, slug, authors, author_bios, tags, excerpt, content)
+      VALUES ('post', 'proj', 'normalización test', 'norm', '[]', '[]', '[]', 'normalizacion', 'normalizacion texto')
+    `).run();
+
+    await service.search('normalizacion', 10, 0);
+    await service.search('NORMALIZACION', 10, 0);
     expect(mockEmbeddingService.embedBatch).toHaveBeenCalledTimes(1);
   });
 });
