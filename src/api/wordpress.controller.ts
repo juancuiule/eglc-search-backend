@@ -4,8 +4,8 @@ import {
   Param,
   ParseIntPipe
 } from "@nestjs/common";
-import { postToDoc } from "src/wordpress/wordpress.mappers";
-import { WordPressService } from "src/wordpress/wordpress.service";
+import { postToDoc } from "../wordpress/wordpress.mappers";
+import { WordPressService } from "../wordpress/wordpress.service";
 
 @Controller("api")
 export class WordpressController {

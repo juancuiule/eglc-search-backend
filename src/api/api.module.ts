@@ -5,7 +5,7 @@ import { ApiKeyGuard } from "./guards/api-key.guard";
 import { ReindexController } from "./reindex.controller";
 import { SearchController } from "./search.controller";
 import { WordpressController } from "./wordpress.controller";
-import { WordPressModule } from "src/wordpress/wordpress.module";
+import { WordPressModule } from "../wordpress/wordpress.module";
 
 @Module({
   imports: [SearchModule, IndexModule, WordPressModule],

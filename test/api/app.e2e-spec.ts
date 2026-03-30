@@ -56,9 +56,10 @@ describe('App E2E', () => {
       .send({ query: 'capítulo' });
 
     expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-    expect(res.body.length).toBeGreaterThan(0);
-    expect(res.body[0].title).toBe('El capítulo uno');
+    expect(Array.isArray(res.body.results)).toBe(true);
+    expect(res.body.results.length).toBeGreaterThan(0);
+    expect(res.body.results[0].title).toBe('El capítulo uno');
+    expect(typeof res.body.total).toBe('number');
   });
 
   it('POST /api/search returns 400 for missing query', async () => {
@@ -70,6 +71,20 @@ describe('App E2E', () => {
     const res = await request(app.getHttpServer())
       .post('/api/search')
       .send({ query: 'test', limit: 100 });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /api/search returns 400 for page = 0', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/search')
+      .send({ query: 'test', page: 0 });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /api/search returns 400 for negative page', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/search')
+      .send({ query: 'test', page: -1 });
     expect(res.status).toBe(400);
   });
 

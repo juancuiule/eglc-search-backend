@@ -35,7 +35,11 @@ export class SearchController {
       );
     }
 
-    const skip = body.page && body.page > 1 ? (body.page - 1) * limit : 0;
+    const page = body.page ?? 1;
+    if (!Number.isInteger(page) || page < 1) {
+      throw new BadRequestException('page must be a positive integer');
+    }
+    const skip = (page - 1) * limit;
 
     return this.searchService.search(query, limit, skip);
   }
