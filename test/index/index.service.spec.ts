@@ -4,6 +4,7 @@ import { IndexService } from '../../src/index/index.service';
 import { DatabaseService } from '../../src/database/database.service';
 import { WordPressService } from '../../src/wordpress/wordpress.service';
 import { EmbeddingService } from '../../src/index/embedding.service';
+import { CacheService } from '../../src/search/cache.service';
 
 function makeDbService() {
   const db = new DatabaseService(':memory:');
@@ -21,6 +22,8 @@ const mockEmbeddingService = {
   embedAll: jest.fn().mockResolvedValue([]),
   embedBatch: jest.fn().mockResolvedValue([[0.1, 0.2]]),
 };
+
+const mockCacheService = { clear: jest.fn() };
 
 describe('IndexService', () => {
   let service: IndexService;
@@ -40,6 +43,7 @@ describe('IndexService', () => {
         { provide: DatabaseService, useValue: db },
         { provide: WordPressService, useValue: mockWpService },
         { provide: EmbeddingService, useValue: mockEmbeddingService },
+        { provide: CacheService, useValue: mockCacheService },
       ],
     }).compile();
 
@@ -85,12 +89,12 @@ describe('IndexService', () => {
 
   it('upserts a post by wp_id', async () => {
     const mockPost = {
-      id_post: 77, title: 'Test Post', slug: 'test-post', post_type: 'my-book',
+      id_post: 77, title: 'Test Post', slug: 'test-post', post_type: 'my-book', status: true, post_status: 'publish',
       excerpt: 'ex', content: 'con', permalink: 'https://ex.com/p',
-      image: null, credits: { autores: [] }, tags: [],
+      image: null, credits: { autores: [] }, tags: [], metadata: { description: [], link: [], project: [] },
     };
     mockWpService.getSinglePost.mockResolvedValue(mockPost);
-    mockEmbeddingService.embedBatch.mockResolvedValue([[0.1, 0.2]]);
+    mockEmbeddingService.embedAll.mockResolvedValue([new Float32Array([0.1, 0.2])]);
 
     // seed a project so we can look up its details
     db.db.prepare(
@@ -116,5 +120,39 @@ describe('IndexService', () => {
 
   it('throws NotFoundException when deletePost called for unknown wp_id', () => {
     expect(() => service.deletePost(999)).toThrow();
+  });
+
+  it('upsertPost throws 404 when post_type is in excludedSlugs', async () => {
+    mockWpService.getSinglePost.mockResolvedValue({
+      id_post: 1, title: 'T', slug: 's', post_type: 'nopublicadas', status: true, post_status: 'publish',
+      excerpt: '', content: '', permalink: '', image: null,
+      credits: { autores: [] }, tags: [], metadata: { description: [], link: [], project: [] },
+    });
+    await expect(service.upsertPost(1)).rejects.toThrow('excluded');
+  });
+
+  it('upsertPost throws 404 when project row is not in the index', async () => {
+    mockWpService.getSinglePost.mockResolvedValue({
+      id_post: 2, title: 'T', slug: 's', post_type: 'unknown-project', status: true, post_status: 'publish',
+      excerpt: '', content: '', permalink: '', image: null,
+      credits: { autores: [] }, tags: [], metadata: { description: [], link: [], project: [] },
+    });
+    await expect(service.upsertPost(2)).rejects.toThrow();
+  });
+
+  it('deletePost removes embeddings and document atomically', () => {
+    const { lastInsertRowid: docId } = db.db.prepare(
+      `INSERT INTO documents (wp_id, doc_type, project_slug, title, slug, authors, author_bios, tags)
+       VALUES (88, 'post', 'proj', 'T', 's', '[]', '[]', '[]')`
+    ).run();
+
+    db.db.prepare(
+      `INSERT INTO embeddings (document_id, embedding) VALUES (?, ?)`
+    ).run(docId, Buffer.alloc(4));
+
+    service.deletePost(88);
+
+    expect(db.db.prepare('SELECT * FROM documents WHERE wp_id = 88').get()).toBeUndefined();
+    expect(db.db.prepare(`SELECT * FROM embeddings WHERE document_id = ${docId}`).get()).toBeUndefined();
   });
 });

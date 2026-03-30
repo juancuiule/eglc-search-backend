@@ -16,6 +16,7 @@ import {
 } from "./embedding.service";
 import { postToDoc, projectToDoc } from "../wordpress/wordpress.mappers";
 import { IndexStatus, Project, WPPost } from "../shared/types";
+import { CacheService } from "../search/cache.service";
 
 const CONCURRENCY = 5;
 
@@ -28,7 +29,6 @@ export class IndexService {
   private status: IndexStatus = {
     state: "idle",
     lastIndexedAt: null,
-    totalDocs: 0,
     progress: null,
   };
 
@@ -37,6 +37,7 @@ export class IndexService {
     private readonly db: DatabaseService,
     private readonly wp: WordPressService,
     private readonly embeddings: EmbeddingService,
+    private readonly cache: CacheService,
   ) {
     this.excludedSlugs = new Set(
       (config.get<string>("EXCLUDED_SLUGS", "") || "")
@@ -67,7 +68,11 @@ export class IndexService {
     }
     this.runFullReindex().catch((err) => {
       this.logger.error("Full reindex failed", err);
-      this.status.state = "idle";
+      this.status = {
+        state: "idle",
+        lastIndexedAt: this.status.lastIndexedAt,
+        progress: null,
+      };
     });
   }
 
@@ -75,7 +80,6 @@ export class IndexService {
     this.status = {
       state: "running",
       lastIndexedAt: null,
-      totalDocs: 0,
       progress: { current: 0, total: 0 },
     };
 
@@ -129,7 +133,6 @@ export class IndexService {
     this.status = {
       state: "idle",
       lastIndexedAt: new Date().toISOString(),
-      totalDocs: 0,
       progress: null,
     };
   }
@@ -139,6 +142,11 @@ export class IndexService {
     if (!post)
       throw new NotFoundException(`Post ${wpId} not found in WordPress`);
 
+    // post.post_type holds the project slug in this WP endpoint response (not the standard WP post type)
+    if (this.excludedSlugs.has(post.post_type)) {
+      throw new NotFoundException(`Post belongs to an excluded project: ${post.post_type}`);
+    }
+
     const projectRow = this.db.db
       .prepare(
         "SELECT project_slug, project_title, project_type FROM documents WHERE doc_type = ? AND project_slug = ?",
@@ -147,27 +155,20 @@ export class IndexService {
       | { project_slug: string; project_title: string; project_type: string }
       | undefined;
 
-    const project: Project = projectRow
-      ? {
-          slug: projectRow.project_slug,
-          title: projectRow.project_title ?? post.post_type,
-          "project-type": projectRow.project_type as Project["project-type"],
-          author: "",
-          tags: [],
-          "project-slug": projectRow.project_slug,
-          "description-short": "",
-          "description-long": "",
-        }
-      : {
-          slug: post.post_type,
-          title: post.post_type,
-          "project-type": "book",
-          author: "",
-          tags: [],
-          "project-slug": post.post_type,
-          "description-short": "",
-          "description-long": "",
-        };
+    if (!projectRow) {
+      throw new NotFoundException(`Post's project is not indexed: ${post.post_type}`);
+    }
+
+    const project: Project = {
+      slug: projectRow.project_slug,
+      title: projectRow.project_title ?? post.post_type,
+      "project-type": projectRow.project_type as Project["project-type"],
+      author: "",
+      tags: [],
+      "project-slug": projectRow.project_slug,
+      "description-short": "",
+      "description-long": "",
+    };
 
     const doc = postToDoc(post, project);
 
@@ -213,17 +214,19 @@ export class IndexService {
     if (!row)
       throw new NotFoundException(`Document with wp_id ${wpId} not in index`);
 
-    this.db.db
-      .prepare(
-        "DELETE FROM embeddings WHERE document_id = (SELECT id FROM documents WHERE wp_id = ?)",
-      )
-      .run(wpId);
-    this.db.db
-      .prepare(
-        "DELETE FROM chunks WHERE document_id = (SELECT id FROM documents WHERE wp_id = ?)",
-      )
-      .run(wpId);
-    this.db.db.prepare("DELETE FROM documents WHERE wp_id = ?").run(wpId);
+    this.db.db.transaction(() => {
+      this.db.db
+        .prepare(
+          "DELETE FROM embeddings WHERE document_id = (SELECT id FROM documents WHERE wp_id = ?)",
+        )
+        .run(wpId);
+      this.db.db
+        .prepare(
+          "DELETE FROM chunks WHERE document_id = (SELECT id FROM documents WHERE wp_id = ?)",
+        )
+        .run(wpId);
+      this.db.db.prepare("DELETE FROM documents WHERE wp_id = ?").run(wpId);
+    })();
   }
 
   // ── Embedding phase ────────────────────────────────────────────────────────
@@ -339,7 +342,7 @@ export class IndexService {
           .join("\n")
           .slice(0, TRUNCATE_LENGTH);
 
-        const vectors = await this.embeddings.embedBatch([text]);
+        const vectors = await this.embeddings.embedAll([text]);
         const vector = vectors[0];
 
         if (!vector) return;
@@ -352,7 +355,7 @@ export class IndexService {
       } else {
         const chunks = buildChunks({ ...docLike, documentId: row.id });
 
-        const vectors = await this.embeddings.embedBatch(
+        const vectors = await this.embeddings.embedAll(
           chunks.map((c) => c.embedText),
         );
 

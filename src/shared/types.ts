@@ -83,7 +83,7 @@ export interface DocumentDbRow extends DocumentRow {
 export interface IndexStatus {
   state: "idle" | "running";
   lastIndexedAt: string | null;
-  totalDocs: number;
+  totalDocs?: number;
   progress: { current: number; total: number } | null;
 }
 
