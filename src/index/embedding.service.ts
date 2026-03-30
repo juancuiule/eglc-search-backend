@@ -4,12 +4,13 @@ import OpenAI from "openai";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 export const CHUNK_THRESHOLD = 28_668;
-export const TRUNCATE_LENGTH = 24_000;
+export const TRUNCATE_LENGTH = 20_000;
 export const CHUNK_SIZE = 1_400;
 export const CHUNK_OVERLAP = 175;
 
 const EMBED_MODEL = "text-embedding-3-small";
-const MAX_TOKENS_PER_BATCH = 8000; // safe margin
+const MAX_TOKENS_PER_BATCH = 8_000;
+const MAX_TOKENS_PER_ITEM = 7_500;       // hard cap per single input text
 const CONCURRENCY = 3;
 const RETRY_DELAYS_MS = [1000, 2000, 4000];
 
@@ -101,11 +102,12 @@ export function buildChunks(doc: {
 
   // edge case: empty content
   if (chunks.length === 0) {
+    const fallback = doc.excerpt ?? '';
     chunks.push({
       documentId: doc.documentId ?? 0,
       index: 0,
-      text: "",
-      embedText: prefix,
+      text: fallback,
+      embedText: prefix + fallback,
     });
   }
 
@@ -113,7 +115,7 @@ export function buildChunks(doc: {
 }
 
 function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+  return Math.ceil(text.length / 3);   // conservative for Spanish Unicode (was / 4)
 }
 
 function buildTokenBatches(texts: string[]): string[][] {
@@ -121,7 +123,12 @@ function buildTokenBatches(texts: string[]): string[][] {
   let current: string[] = [];
   let tokens = 0;
 
-  for (const text of texts) {
+  for (let text of texts) {
+    // Per-item hard cap: truncate silently if individual text exceeds limit
+    if (estimateTokens(text) > MAX_TOKENS_PER_ITEM) {
+      text = text.slice(0, MAX_TOKENS_PER_ITEM * 3);
+    }
+
     const t = estimateTokens(text);
 
     if (tokens + t > MAX_TOKENS_PER_BATCH && current.length > 0) {

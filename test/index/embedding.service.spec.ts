@@ -4,6 +4,7 @@ import {
   cosineSimilarity,
   classifyDoc,
   buildChunks,
+  TRUNCATE_LENGTH,
 } from '../../src/index/embedding.service';
 
 describe('float32ToBuffer / bufferToFloat32', () => {
@@ -88,5 +89,33 @@ describe('buildChunks', () => {
     const doc = { title: 'T', authors: 'A', content };
     const chunks = buildChunks(doc);
     expect(chunks.length).toBe(2);
+  });
+});
+
+describe('TRUNCATE_LENGTH', () => {
+  it('is 20000', () => {
+    expect(TRUNCATE_LENGTH).toBe(20_000);
+  });
+});
+
+describe('buildChunks — empty content fallback', () => {
+  it('uses excerpt as fallback text when content is empty', () => {
+    const doc = {
+      title: 'T',
+      authors: 'A',
+      content: '',
+      excerpt: 'Este es el extracto del documento',
+    };
+    const chunks = buildChunks(doc);
+    expect(chunks.length).toBe(1);
+    expect(chunks[0].text).toBe('Este es el extracto del documento');
+    expect(chunks[0].embedText).toContain('Este es el extracto del documento');
+  });
+
+  it('returns single chunk with empty text when both content and excerpt are absent', () => {
+    const doc = { title: 'T', authors: 'A', content: null };
+    const chunks = buildChunks(doc);
+    expect(chunks.length).toBe(1);
+    expect(chunks[0].text).toBe('');
   });
 });
