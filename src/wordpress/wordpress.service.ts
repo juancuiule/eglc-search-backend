@@ -56,12 +56,19 @@ export class WordPressService {
 
   async getSinglePost(wpId: number): Promise<WPPost | null> {
     const res = await fetch(`${this.baseUrl}/wp-json/api/gato_get_posts/`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         args: JSON.stringify({
+          post_type: ['any'],
+          posts_per_page: 1,
           paged: 1,
           post__in: [wpId],
+          meta_query: {
+            relation: 'OR',
+            '0': { key: 'lang', value: 'es', compare: '=' },
+            '1': { key: 'lang', compare: 'NOT EXISTS' },
+          },
         }),
         reduced: false,
       }),

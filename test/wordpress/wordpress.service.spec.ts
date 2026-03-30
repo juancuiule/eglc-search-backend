@@ -44,4 +44,20 @@ describe('WordPressService', () => {
     const result = await service.getSinglePost(99);
     expect(result).toEqual(mockPost);
   });
+
+  it('getSinglePost sends post_type any, posts_per_page 1, and language filter', async () => {
+    let capturedBody: any;
+    global.fetch = jest.fn().mockImplementation(async (_url: string, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return { ok: true, json: async () => [] };
+    }) as jest.Mock;
+
+    await service.getSinglePost(99);
+
+    const args = JSON.parse(capturedBody.args);
+    expect(args.post_type).toEqual(['any']);
+    expect(args.posts_per_page).toBe(1);
+    expect(args.meta_query).toBeDefined();
+    expect(args.meta_query['0'].key).toBe('lang');
+  });
 });
