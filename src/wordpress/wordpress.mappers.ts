@@ -1,18 +1,20 @@
 import { DocumentRow, Project, WPPost } from "../shared/types";
 
 export function stripHtml(html: string | null | undefined): string {
-  if (!html) return '';
+  if (!html) return "";
   return html
-    .replace(/<[^>]*>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
+    .replace(/<[^>]*>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
-    .replace(/&nbsp;/g, '\u00a0')
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&nbsp;/g, "\u00a0")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) =>
+      String.fromCharCode(parseInt(hex, 16)),
+    )
     .replace(/&#([0-9]+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
-    .replace(/\s+/g, ' ')
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -31,7 +33,10 @@ export function projectToDoc(project: Project): DocumentRow {
     authors: JSON.stringify([project.author].filter(Boolean)),
     author_bios: JSON.stringify([]),
     tags: JSON.stringify(project.tags ?? []),
-    image_url: project["og-image"] ?? project["project-product-image"] ?? null,
+    image_url:
+      project["project-type"] === "book"
+        ? (project["project-product-image"] ?? project["og-image"] ?? null)
+        : (project["og-image"] ?? null),
   };
 }
 
@@ -39,7 +44,7 @@ export function postToDoc(post: WPPost, project: Project): DocumentRow {
   const rawExcerpt =
     post.excerpt && post.excerpt.length > 0
       ? post.excerpt
-      : post.metadata?.description?.[0] ?? '';
+      : (post.metadata?.description?.[0] ?? "");
 
   return {
     wp_id: post.id_post,
