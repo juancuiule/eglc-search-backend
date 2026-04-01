@@ -86,15 +86,17 @@ export class IndexService {
     // ── Phase 1: content ─────────────────────────────────────────────────────
     this.db.resetSchema();
 
-
     const allProjects = await this.wp.getProjects();
     const projects = allProjects.filter(
       (p) =>
         !this.excludedSlugs.has(p.slug) &&
-        !this.excludedTypes.has(p["project-type"]),
+        !this.excludedTypes.has(p["project-type"]) &&
+        p["hide-from-search"] !== "hide",
     );
 
-    this.logger.log(`Indexing ${projects.length} projects (excluded ${allProjects.length - projects.length})`);
+    this.logger.log(
+      `Indexing ${projects.length} projects (excluded ${allProjects.length - projects.length})`,
+    );
     this.status.progress = { current: 0, total: projects.length };
 
     const insertDoc = this.db.db.prepare(`
@@ -125,9 +127,8 @@ export class IndexService {
 
     this.buildVocabulary();
 
-
     // ── Phase 2: embeddings ──────────────────────────────────────────────────
-    
+
     await this.runEmbeddingPhase();
 
     this.status = {
@@ -175,7 +176,8 @@ export class IndexService {
     // Check if excluded
     if (
       this.excludedSlugs.has(project.slug) ||
-      this.excludedTypes.has(project["project-type"])
+      this.excludedTypes.has(project["project-type"]) ||
+      project["hide-from-search"] === "hide"
     ) {
       this.status = {
         state: "idle",
@@ -245,7 +247,9 @@ export class IndexService {
 
     // post.post_type holds the project slug in this WP endpoint response (not the standard WP post type)
     if (this.excludedSlugs.has(post.post_type)) {
-      throw new NotFoundException(`Post belongs to an excluded project: ${post.post_type}`);
+      throw new NotFoundException(
+        `Post belongs to an excluded project: ${post.post_type}`,
+      );
     }
 
     const projectRow = this.db.db
@@ -257,7 +261,9 @@ export class IndexService {
       | undefined;
 
     if (!projectRow) {
-      throw new NotFoundException(`Post's project is not indexed: ${post.post_type}`);
+      throw new NotFoundException(
+        `Post's project is not indexed: ${post.post_type}`,
+      );
     }
 
     const project: Project = {
@@ -269,6 +275,7 @@ export class IndexService {
       "project-slug": projectRow.project_slug,
       "description-short": "",
       "description-long": "",
+      "hide-from-search": "show",
     };
 
     const doc = postToDoc(post, project);

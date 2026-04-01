@@ -19,6 +19,7 @@ export interface Project {
   "project-type": ProjectType;
   "project-product-image"?: string;
   "og-image"?: string;
+  "hide-from-search": string;
 }
 
 export interface WPAuthor {
