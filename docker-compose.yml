@@ -10,11 +10,11 @@ services:
       - traefik-public
     env_file:
       - .env
-    environment:
-      DB_PATH: /data/search.db
-      PORT: 3000
-      EXCLUDED_SLUGS: ${EXCLUDED_SLUGS:-nopublicadas,espacio_negativo,clima_proceso}
-      EXCLUDED_TYPES: ${EXCLUDED_TYPES:-podcast,collection}
+    # environment:
+    #   DB_PATH: /data/search.db
+    #   PORT: 3000
+    #   EXCLUDED_SLUGS: ${EXCLUDED_SLUGS:-nopublicadas,espacio_negativo,clima_proceso}
+    #   EXCLUDED_TYPES: ${EXCLUDED_TYPES:-podcast,collection}
     deploy:
       labels:
         - "traefik.enable=true"
